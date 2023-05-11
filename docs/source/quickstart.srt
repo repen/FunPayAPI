@@ -1,0 +1,25 @@
+=============
+Быстрый страт
+=============
+
+.. meta::
+   :description: Быстрый старт
+   :keywords: funpay, funpayapi, fpapi, docs, documentation, guide, quickstart, быстрый старт
+
+
+.. code:: python
+    # Это простой бот ответа на сообщение "Привет".
+    from FunPayAPI import Account, Runner, types, enums
+
+    
+    TOKEN = "<golden_key>"
+
+    # Создаем класс аккаунта и сразу же получаем данные аккаунта.
+    acc = Account(TOKEN).get()
+
+    # Создаем класс "прослушивателя" событий.
+    runner = Runner(acc)
+
+    # Запускаем "прослушку" событий.
+    for event in runner.listen(requests_delay=4):
+        if event.type is 

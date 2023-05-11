@@ -1,0 +1,11 @@
+# pycharm
+.idea/
+
+# enviroment
+venv/
+
+# Byte-compiled / optimized files
+__pycache__/
+
+# Sphinx
+docs/build/
