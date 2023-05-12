@@ -6,8 +6,8 @@ import requests
 
 class AccountNotInitiatedError(Exception):
     """
-    Исключение, которое возбуждается, если предпринята попытка вызвать метод класса Account без предварительного
-    получения данных аккаунта с помощью метода Account.get().
+    Исключение, которое возбуждается, если предпринята попытка вызвать метод класса :class:`FunPayAPI.account.Account`
+    без предварительного получения данных аккаунта с помощью метода :meth:`FunPayAPI.account.Account.get`.
     """
     def __init__(self):
         pass

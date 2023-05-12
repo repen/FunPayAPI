@@ -37,6 +37,7 @@ GitHub: `GitHub <https://github.com/woopertail/FunPayAPI>`_
    install
    quickstart
    account
+   runner
    types
    events
    enums

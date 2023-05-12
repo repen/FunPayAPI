@@ -1137,7 +1137,7 @@ class Account:
         (парсятся при первом выполнении метода Account.get).
 
         :return: все подкатегории FunPay в виде словаря {тип подкатегории: {ID: подкатегория}}
-        :rtype: :obj:`dict` {:class:`FunPayAPI.common.enums.SubCategoryTypes: :obj:`dict` {:obj:`int` or :obj:`str`: :class:`FunPayAPI.types.SubCategory`}}
+        :rtype: :obj:`dict` {:class:`FunPayAPI.common.enums.SubCategoryTypes`: :obj:`dict` {:obj:`int` or :obj:`str`: :class:`FunPayAPI.types.SubCategory`}}
         """
         return self.__sorted_subcategories
 
