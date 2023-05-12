@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 
 setup(name='FunPayAPI',
-      version="1.0.5",
+      version="1.0.6",
       description='Прослойка между FunPayAPI и клиентом.',
       author='Woopertail',
       author_email='woopertail@gmail.com',
