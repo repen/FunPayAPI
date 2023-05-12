@@ -1,9 +1,15 @@
 from setuptools import setup, find_packages
 
 
+with open("README.md", "r", encoding="utf-8") as f:
+    long_desc = f.read()
+
+
 setup(name='FunPayAPI',
       version="1.0.6",
       description='Прослойка между FunPayAPI и клиентом.',
+      long_description=long_desc,
+      long_description_content_type="text/markdown",
       author='Woopertail',
       author_email='woopertail@gmail.com',
       url='https://github.com/woopertail/FunPayAPI',
