@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 
 setup(name='FunPayAPI',
-      version="1.0.6",
+      version="1.0.7",
       description='Прослойка между FunPayAPI и клиентом.',
       long_description=long_desc,
       long_description_content_type="text/markdown",
