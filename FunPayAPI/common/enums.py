@@ -118,13 +118,17 @@ class Wallet(Enum):
     """
     QIWI = 0
     """Qiwi кошелек."""
-    BINANCE = 2
+    BINANCE = 1
     """Binance Pay."""
-    TRC = 3
+    TRC = 2
     """USDT TRC20."""
-    CARD = 4
-    """Банковская карта."""
-    WEBMONEY = 5
+    CARD_RUB = 3
+    """Рублевая банковская карта."""
+    CARD_USD = 4
+    """Долларовая банковская карта."""
+    CARD_EUR = 5
+    """Евро банковская карта."""
+    WEBMONEY = 6
     """WebMoney WMZ."""
-    YOUMONEY = 6
+    YOUMONEY = 7
     """ЮMoney."""

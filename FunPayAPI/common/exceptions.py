@@ -2,6 +2,7 @@
 В данном модуле описаны все кастомные исключения, используемые в пакете FunPayAPI.
 """
 import requests
+from .. import types
 
 
 class AccountNotInitiatedError(Exception):
@@ -59,6 +60,35 @@ class UnauthorizedError(RequestFailedError):
         return "Не авторизирован (возможно, введен неверный golden_key?)."
 
 
+class WithdrawError(RequestFailedError):
+    """
+    Исключение, которое возбуждается, если произошла ошибка при попытке вывести средства с аккаунта.
+    """
+    def __init__(self, response, error_message: str | None):
+        super(WithdrawError, self).__init__(response)
+        self.error_message = error_message
+        if not self.error_message:
+            self.log_response = True
+
+    def short_str(self):
+        return f"Произошла ошибка при выводе средств с аккаунта{f': {self.error_message}' if self.error_message else '.'}"
+
+
+class RaiseError(RequestFailedError):
+    """
+    Исключение, которое возбуждается, если произошла ошибка при попытке поднять лоты.
+    """
+    def __init__(self, response, category: types.Category, error_message: str | None, wait_time: int | None):
+        super(RaiseError, self).__init__(response)
+        self.category = category
+        self.error_message = error_message
+        self.wait_time = wait_time
+
+    def short_str(self):
+        return f"Не удалось поднять лоты категории \"{self.category.name}\"" \
+               f"{f': {self.error_message}' if self.error_message else '.'}"
+
+
 class ImageUploadError(RequestFailedError):
     """
     Исключение, которое возбуждается, если произошла ошибка при выгрузке изображения.
@@ -110,11 +140,10 @@ class LotSavingError(RequestFailedError):
     """
     Исключение, которое возбуждается, если при сохранении лота произошла ошибка.
     """
-    def __init__(self, response: requests.Response, error_message: str | None, lot_id: int, subcategory_id: int | str):
+    def __init__(self, response: requests.Response, error_message: str | None, lot_id: int):
         super(LotSavingError, self).__init__(response)
         self.error_message = error_message
         self.lot_id = lot_id
-        self.subcategory_id = subcategory_id
         if not self.error_message:
             self.log_response = True
 

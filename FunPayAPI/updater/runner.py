@@ -41,7 +41,7 @@ class Runner:
     def __init__(self, account: Account, disable_message_requests: bool = False,
                  disabled_order_requests: bool = False):
         # todo добавить события и исключение событий о новых покупках (не продажах!)
-        if not account.is_initiated():
+        if not account.is_initiated:
             raise exceptions.AccountNotInitiatedError()
         if account.runner:
             raise Exception("К аккаунту уже привязан Runner!")  # todo
@@ -155,7 +155,10 @@ class Runner:
         # Получаем все изменившиеся чаты
         for msg in chats:
             chat_id = int(msg["data-id"])
-            last_msg_text = msg.find("div", {"class": "contact-item-message"}).text
+            last_msg_text = msg.find("div", {"class": "contact-item-message"})
+            if not last_msg_text:
+                continue
+            last_msg_text = last_msg_text.text
             if self.last_messages.get(chat_id) == last_msg_text:
                 continue
             unread = True if "unread" in msg.get("class") else False

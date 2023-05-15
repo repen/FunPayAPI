@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Literal, Any, Optional
+from typing import TYPE_CHECKING, Literal, Any, Optional, IO
 if TYPE_CHECKING:
     from .updater.runner import Runner
 
@@ -13,7 +13,7 @@ import json
 import time
 
 from . import types
-from .common import exceptions, utils
+from .common import exceptions, utils, enums
 
 
 logger = logging.getLogger("FunPayAPI.account")
@@ -53,10 +53,6 @@ class Account:
         """ID аккаунта."""
         self.username: str | None = None
         """Никнейм аккаунта."""
-        self.balance: int | None = None
-        """Баланс аккаунта."""
-        self.currency: str | None = None
-        """Валюта аккаунта."""
         self.active_sales: int | None = None
         """Активные продажи."""
         self.active_purchases: int | None = None
@@ -90,7 +86,7 @@ class Account:
         Отправляет запрос к FunPay. Добавляет в заголовки запроса user_agent и куки.
 
         :param request_method: метод запроса ("get" / "post").
-        :type request_method: Literal["post", "get"]
+        :type request_method: :obj:`str` `post` or `get`
 
         :param api_method: метод API / полная ссылка.
         :type api_method: :obj:`str`
@@ -126,7 +122,8 @@ class Account:
 
     def get(self, update_phpsessid: bool = False) -> Account:
         """
-        Получает / обновляет данные об аккаунте.
+        Получает / обновляет данные об аккаунте. Необходимо вызывать каждые 40-60 минут, дабы обновить
+        :py:obj:`.Account.phpsessid`.
 
         :param update_phpsessid: обновить :py:obj:`.Account.phpsessid` или использовать старый.
         :type update_phpsessid: :obj:`bool`, опционально
@@ -154,15 +151,10 @@ class Account:
         active_purchases = parser.find("span", {"class": "badge badge-orders"})
         self.active_purchases = int(active_purchases.text) if active_purchases else 0
 
-        balance_badge = parser.find("span", {"class": "badge badge-balance"})
-        self.balance = float("".join(balance_badge.text.split(" ")[:-1])) if balance_badge else 0
-        self.currency = balance_badge.text.split(" ")[-1] if balance_badge else ""
-
         cookies = response.cookies.get_dict()
         if update_phpsessid or not self.phpsessid:
             self.phpsessid = cookies["PHPSESSID"]
-
-        if not self.is_initiated():
+        if not self.is_initiated:
             self.__setup_categories(html_response)
 
         self.last_update = int(time.time())
@@ -170,8 +162,34 @@ class Account:
         self.__initiated = True
         return self
 
+    def get_balance(self, lot_id: int = 18853876) -> types.Balance:
+        """
+        Получает информацию о балансе пользователя.
+
+        :param lot_id: ID лота, на котором проверять баланс.
+        :type lot_id: :obj:`int`, опционально
+
+        :return: информацию о балансе пользователя.
+        :rtype: :class:`FunPayAPI.types.Balance`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+        response = self.method("get", f"lots/offer?id={lot_id}", {"accept": "*/*"}, {}, raise_not_200=True)
+        html_response = response.content.decode()
+        parser = BeautifulSoup(html_response, "html.parser")
+
+        username = parser.find("div", {"class": "user-link-name"})
+        if not username:
+            raise exceptions.UnauthorizedError(response)
+
+        balances = parser.find("select", {"name": "method"})
+        balance = types.Balance(float(balances["data-balance-total-rub"]), float(balances["data-balance-rub"]),
+                                float(balances["data-balance-total-usd"]), float(balances["data-balance-usd"]),
+                                float(balances["data-balance-total-eur"]), float(balances["data-balance-eur"]))
+        return balance
+
     def get_chat_history(self, chat_id: int | str, last_message_id: int = 99999999999999999999999,
-                         interlocutor_username: str | None = None, from_id: int = 0) -> list[types.Message]:
+                         interlocutor_username: Optional[str] = None, from_id: int = 0) -> list[types.Message]:
         """
         Получает историю указанного чата (до 100 последних сообщений).
 
@@ -181,8 +199,8 @@ class Account:
         :param last_message_id: ID сообщения, с которого начинать историю (фильтр FunPay).
         :type last_message_id: :obj:`int`
 
-        :param interlocutor_username: никнейм собеседника. Упрощает идентификацию авторов сообщения. Не работает, если
-            запрошена история публичного чата.
+        :param interlocutor_username: никнейм собеседника. Не нужно указывать для получения истории публичного чата.
+            Так же не обязательно, но желательно указывать для получения истории личного чата.
         :type interlocutor_username: :obj:`str` or :obj:`None`, опционально.
 
         :param from_id: все сообщения с ID < переданного не попадут в возвращаемый список сообщений.
@@ -191,7 +209,7 @@ class Account:
         :return: история указанного чата.
         :rtype: :obj:`list` of :class:`FunPayAPI.types.Message`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         headers = {
@@ -202,23 +220,27 @@ class Account:
             "node": chat_id,
             "last_message": last_message_id
         }
-        response = self.method("get", f"https://funpay.com/chat/history?node={chat_id}&last_message={last_message_id}",
+        response = self.method("get", f"chat/history?node={chat_id}&last_message={last_message_id}",
                                headers, payload, raise_not_200=True)
 
         json_response = response.json()
         if not json_response.get("chat") or not json_response["chat"].get("messages"):
             return []
-        interlocutor_id = int(json_response["chat"]["node"]["name"].split("-")[2])
+        if isinstance(chat_id, int):
+            interlocutor_id = int(json_response["chat"]["node"]["name"].split("-")[2])
+        else:
+            interlocutor_id = None
         return self.__parse_messages(json_response["chat"]["messages"], chat_id, interlocutor_id,
                                      interlocutor_username, from_id)
 
-    def get_chats_histories(self, chats_data: dict[int, str | None]) -> dict[int, list[types.Message]]:
+    def get_chats_histories(self, chats_data: dict[int | str, str | None]) -> dict[int, list[types.Message]]:
         """
-        Получает историю сообщений сразу нескольких личных чатов (до 100 сообщений на 1 чат).
+        Получает историю сообщений сразу нескольких чатов
+        (до 50 сообщений на личный чат, до 25 сообщений на публичный чат).
 
         :param chats_data: ID чатов и никнеймы собеседников (None, если никнейм неизвестен)\n
             Например: {48392847: "SLLMK", 58392098: "Amongus", 38948728: None}
-        :type chats_data: :obj:`dict` {:obj:`int`: :obj:`str` or :obj:`None`}
+        :type chats_data: :obj:`dict` {:obj:`int` or :obj:`str`: :obj:`str` or :obj:`None`}
 
         :return: словарь с историями чатов в формате {ID чата: [список сообщений]}
         :rtype: :obj:`dict` {:obj:`int`: :obj:`list` of :class:`FunPayAPI.types.Message`}
@@ -235,7 +257,7 @@ class Account:
             "request": False,
             "csrf_token": self.csrf_token
         }
-        response = self.method("post", "https://funpay.com/runner/", headers, payload, raise_not_200=True)
+        response = self.method("post", "runner/", headers, payload, raise_not_200=True)
         json_response = response.json()
 
         result = {}
@@ -243,23 +265,28 @@ class Account:
             if not i.get("data"):
                 result[i.get("id")] = []
                 continue
-            interlocutor_id = int(i["data"]["node"]["name"].split("-")[2])
-            messages = self.__parse_messages(i["data"]["messages"], i.get("id"), interlocutor_id,
-                                             chats_data[i.get("id")])
+            if isinstance(i.get("id"), int):
+                interlocutor_id = int(i["data"]["node"]["name"].split("-")[2])
+                interlocutor_name = chats_data[i.get("id")]
+            else:
+                interlocutor_id = None
+                interlocutor_name = None
+            messages = self.__parse_messages(i["data"]["messages"], i.get("id"), interlocutor_id, interlocutor_name)
             result[i.get("id")] = messages
         return result
 
-    def upload_image(self, image: str | bytes) -> int:
+    def upload_image(self, image: str | IO[bytes]) -> int:
         """
         Выгружает изображение на сервер FunPay для дальнейшей отправки в качестве сообщения.
+        Для отправки изображения в чат рекомендуется использовать метод :meth:`FunPayAPI.account.Account.send_image`.
 
-        :param image: путь до изображения или изображение в виде байтов.
+        :param image: путь до изображения или представление изображения в виде байтов.
         :type image: :obj:`str` or :obj:`bytes`
 
-        :return: ID изображения на FunPay.
+        :return: ID изображения на серверах FunPay.
         :rtype: :obj:`int`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         if isinstance(image, str):
@@ -272,8 +299,7 @@ class Account:
             'file': ("funpay_cardinal_image.png", img, "image/png"),
             'file_id': "0"
         }
-        boundary = '----WebKitFormBoundary' \
-                   + ''.join(random.sample(string.ascii_letters + string.digits, 16))
+        boundary = '----WebKitFormBoundary' + ''.join(random.sample(string.ascii_letters + string.digits, 16))
         m = MultipartEncoder(fields=fields, boundary=boundary)
 
         headers = {
@@ -282,8 +308,7 @@ class Account:
             "content-type": m.content_type,
         }
 
-        link = "https://funpay.com/file/addChatImage"
-        response = self.method("post", link, headers, m)
+        response = self.method("post", "file/addChatImage", headers, m)
 
         if response.status_code == 400:
             try:
@@ -299,22 +324,22 @@ class Account:
             raise exceptions.ImageUploadError(response, None)
         return int(document_id)
 
-    def send_message(self, chat_id: int | str, text: str | None, chat_name: str | None = None,
-                     image_id: int | None = None, add_to_ignore_list: bool = True,
+    def send_message(self, chat_id: int | str, text: Optional[str] = None, chat_name: Optional[str] = None,
+                     image_id: Optional[int] = None, add_to_ignore_list: bool = True,
                      update_last_saved_message: bool = False) -> types.Message:
         """
         Отправляет сообщение в чат.
 
-        :param chat_id: ID чата или чего текстовое обозначение.
+        :param chat_id: ID чата.
         :type chat_id: :obj:`int` or :obj:`str`
 
         :param text: текст сообщения.
-        :type text: :obj:`str` or :obj:`None`
+        :type text: :obj:`str` or :obj:`None`, опционально
 
         :param chat_name: название чата (для возвращаемого объекта сообщения) (не нужно для отправки сообщения в публичный чат).
         :type chat_name: :obj:`str` or :obj:`None`, опционально
 
-        :param image_id: ID изображения.
+        :param image_id: ID изображения. Доступно только для личных чатов.
         :type image_id: :obj:`int` or :obj:`None`, опционально
 
         :param add_to_ignore_list: добавлять ли ID отправленного сообщения в игнорируемый список Runner'а?
@@ -326,7 +351,7 @@ class Account:
         :return: экземпляр отправленного сообщения.
         :rtype: :class:`FunPayAPI.types.Message`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         headers = {
@@ -343,7 +368,7 @@ class Account:
             request["data"]["image_id"] = image_id
             request["data"]["content"] = ""
         else:
-            request["data"]["content"] = text
+            request["data"]["content"] = text or ""
 
         objects = [
             {
@@ -359,40 +384,70 @@ class Account:
             "csrf_token": self.csrf_token
         }
 
-        link = "https://funpay.com/runner/"
-        response = self.method("post", link, headers, payload, raise_not_200=True)
-
+        response = self.method("post", "runner/", headers, payload, raise_not_200=True)
         json_response = response.json()
-
-        if json_response.get("response"):
-            if json_response.get("response").get("error") is not None:
-                raise exceptions.MessageNotDeliveredError(response, json_response.get("error"), chat_id)
-
-            mes = json_response["objects"][0]["data"]["messages"][-1]
-            parser = BeautifulSoup(mes["html"], "html.parser")
-            try:
-                if image_link := parser.find("a", {"class": "chat-img-link"}):
-                    image_link = image_link.get("href")
-                    message_text = None
-                else:
-                    message_text = parser.find("div", {"class": "message-text"}).text
-            except Exception as e:
-                logger.debug("SEND_MESSAGE RESPONSE")
-                logger.debug(response.content.decode())
-                raise e
-
-            message_obj = types.Message(int(mes["id"]), message_text, chat_id, chat_name,
-                                        self.username, self.id, mes["html"], image_link)
-            if self.runner:
-                if add_to_ignore_list:
-                    self.runner.mark_as_by_bot(chat_id, message_obj.id)
-                if update_last_saved_message:
-                    self.runner.update_last_message(chat_id, message_text)
-            return message_obj
-        else:
+        if not (resp := json_response.get("response")):
             raise exceptions.MessageNotDeliveredError(response, None, chat_id)
 
-    def send_review(self, order_id: str, text: str, rating: int) -> str:
+        if (error_text := resp.get("error")) is not None:
+            raise exceptions.MessageNotDeliveredError(response, error_text, chat_id)
+
+        mes = json_response["objects"][0]["data"]["messages"][-1]
+        parser = BeautifulSoup(mes["html"], "html.parser")
+        try:
+            if image_link := parser.find("a", {"class": "chat-img-link"}):
+                image_link = image_link.get("href")
+                message_text = None
+            else:
+                message_text = parser.find("div", {"class": "message-text"}).text
+        except Exception as e:
+            logger.debug("SEND_MESSAGE RESPONSE")
+            logger.debug(response.content.decode())
+            raise e
+
+        message_obj = types.Message(int(mes["id"]), message_text, chat_id, chat_name,
+                                    self.username, self.id, mes["html"], image_link)
+        if self.runner and isinstance(chat_id, int):
+            if add_to_ignore_list:
+                self.runner.mark_as_by_bot(chat_id, message_obj.id)
+            if update_last_saved_message:
+                self.runner.update_last_message(chat_id, message_text)
+        return message_obj
+
+    def send_image(self, chat_id: int, image: int | str | IO[bytes], chat_name: Optional[str] = None,
+                   add_to_ignore_list: bool = True, update_last_saved_message: bool = False) -> types.Message:
+        """
+        Отправляет изображение в чат. Доступно только для личных чатов.
+
+        :param chat_id: ID чата.
+        :type chat_id: :obj:`int`
+
+        :param image: ID изображения / путь до изображения / изображение в виде байтов.
+            Если передан путь до изображения или представление изображения в виде байтов, сначала оно будет выгружено
+            с помощью метода :meth:`FunPayAPI.account.Account.upload_image`.
+        :type image: :obj:`int` or :obj:`str` or :obj:`bytes`
+
+        :param chat_name: Название чата (никнейм собеседника). Нужен для возвращаемого объекта.
+        :type chat_name: :obj:`str` or :obj:`None`, опционально
+
+        :param add_to_ignore_list: добавлять ли ID отправленного сообщения в игнорируемый список Runner'а?
+        :type add_to_ignore_list: :obj:`bool`, опционально
+
+        :param update_last_saved_message: обновлять ли последнее сохраненное сообщение на отправленное в Runner'е?
+        :type update_last_saved_message: :obj:`bool`, опционально
+
+        :return: объект отправленного сообщения.
+        :rtype: :class:`FunPayAPI.types.Message`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+
+        if not isinstance(image, int):
+            image = self.upload_image(image)
+        result = self.send_message(chat_id, None, chat_name, image, add_to_ignore_list, update_last_saved_message)
+        return result
+
+    def send_review(self, order_id: str, text: str, rating: Literal[1, 2, 3, 4, 5] = 5) -> str:
         """
         Отправляет / редактирует отзыв / ответ на отзыв.
 
@@ -403,12 +458,12 @@ class Account:
         :type text: :obj:`str`
 
         :param rating: рейтинг (от 1 до 5).
-        :type rating: :obj:`int`
+        :type rating: :obj:`int`, опционально
 
         :return: ответ FunPay (HTML-код блока отзыва).
         :rtype: :obj:`str`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         headers = {
@@ -423,7 +478,7 @@ class Account:
             "orderId": order_id
         }
 
-        response = self.method("post", "https://funpay.com/orders/review", headers, payload)
+        response = self.method("post", "orders/review", headers, payload)
         if response.status_code == 400:
             json_response = response.json()
             msg = json_response.get("msg")
@@ -443,7 +498,7 @@ class Account:
         :return: ответ FunPay (HTML-код блока отзыва).
         :rtype: :obj:`str`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         headers = {
@@ -456,7 +511,7 @@ class Account:
             "orderId": order_id
         }
 
-        response = self.method("post", "https://funpay.com/orders/reviewDelete", headers, payload)
+        response = self.method("post", "orders/reviewDelete", headers, payload)
 
         if response.status_code == 400:
             json_response = response.json()
@@ -474,7 +529,7 @@ class Account:
         :param order_id: ID заказа.
         :type order_id: :obj:`str`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         headers = {
@@ -488,12 +543,68 @@ class Account:
             "csrf_token": self.csrf_token
         }
 
-        response = self.method("post", "https://funpay.com/orders/refund", headers, payload, raise_not_200=True)
+        response = self.method("post", "orders/refund", headers, payload, raise_not_200=True)
 
         if response.json().get("error"):
             raise exceptions.RefundError(response, response.json().get("msg"), order_id)
 
-    def get_raise_modal(self, category_id: int, subcategory_id: int) -> dict:
+    def withdraw(self, currency: enums.Currency, wallet: enums.Wallet, amount: int | float, address: str) -> float:
+        """
+        Отправляет запрос на вывод средств.
+
+        :param currency: валюта.
+        :type currency: :class:`FunPayAPI.common.enums.Currency`
+
+        :param wallet: тип кошелька.
+        :type wallet: :class:`FunPayAPI.common.enums.Wallet`
+
+        :param amount: кол-во средств.
+        :type amount: :obj:`int` or :obj:`float`
+
+        :param address: адрес кошелька.
+        :type address: :obj:`str`
+
+        :return: кол-во выведенных средств с учетом комиссии FunPay.
+        :rtype: :obj:`float`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+
+        currencies = {
+            enums.Currency.RUB: "rub",
+            enums.Currency.USD: "usd",
+            enums.Currency.EUR: "eur"
+        }
+
+        wallets = {
+            enums.Wallet.QIWI: "qiwi",
+            enums.Wallet.YOUMONEY: "fps",
+            enums.Wallet.BINANCE: "binance",
+            enums.Wallet.TRC: "usdt_trc",
+            enums.Wallet.CARD_RUB: "card_rub",
+            enums.Wallet.CARD_USD: "card_usd",
+            enums.Wallet.CARD_EUR: "card_eur",
+            enums.Wallet.WEBMONEY: "wmz"
+        }
+        headers = {
+            "accept": "*/*",
+            "x-requested-with": "XMLHttpRequest"
+        }
+        payload = {
+            "csrf_token": self.csrf_token,
+            "currency_id": currencies[currency],
+            "ext_currency_id": wallets[wallet],
+            "wallet": address,
+            "amount_int": str(amount)
+        }
+        response = self.method("post", "withdraw/withdraw", headers, payload, raise_not_200=True)
+        json_response = response.json()
+        if json_response.get("error"):
+            error_message = json_response.get("msg")
+            raise exceptions.WithdrawError(response, error_message)
+        return float(json_response.get("amount_ext"))
+
+    def get_raise_modal(self, category_id: int) -> dict:
         """
         Отправляет запрос на получение modal-формы для поднятия лотов категории (игры).
         !ВНИМАНИЕ! Если на аккаунте только 1 подкатегория, относящаяся переданной категории (игре),
@@ -502,14 +613,13 @@ class Account:
         :param category_id: ID категории (игры).
         :type category_id: :obj:`int`
 
-        :param subcategory_id: ID любой подкатегории, относящейся к переданной категории.
-        :type subcategory_id: :obj:`int`
-
         :return: ответ FunPay.
         :rtype: :obj:`dict`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
+        category = self.get_category(category_id)
+        subcategory = category.get_subcategories()[0]
         headers = {
             "accept": "*/*",
             "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -517,73 +627,70 @@ class Account:
         }
         payload = {
             "game_id": category_id,
-            "node_id": subcategory_id
+            "node_id": subcategory.id
         }
         response = self.method("post", "https://funpay.com/lots/raise", headers, payload, raise_not_200=True)
         json_response = response.json()
         return json_response
 
-    def raise_subcategories(self, category_id: int, subcategory_id: int, exclude: list[int] | None = None) \
-            -> types.RaiseResponse:
+    def raise_lots(self, category_id: int, subcategories: Optional[list[int | types.SubCategory]] = None,
+                   exclude: list[int] | None = None) -> bool:
         """
         Поднимает все лоты всех подкатегорий переданной категории (игры).
 
         :param category_id: ID категории (игры).
         :type category_id: :obj:`int`
 
-        :param subcategory_id: ID любой подкатегории, относящейся к переданной категории.
-        :type subcategory_id: :obj:`int`
+        :param subcategories: список подкатегорий, которые необходимо поднять. Если не указаны, поднимутся все
+            подкатегории переданной категории.
+        :type subcategories: :obj:`list` of :obj:`int` or :class:`FunPayAPI.types.SubCategory`
 
         :param exclude: ID подкатегорий, которые не нужно поднимать.
         :type exclude: :obj:`list` of :obj:`int`, опционально.
 
-        :return: ответ FunPay.
-        :rtype: :class:`FunPayAPI.types.RaiseResponse`
+        :return: `True`
+        :rtype: :obj:`bool`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
-        check = self.get_raise_modal(category_id, subcategory_id)
+        if not (category := self.get_category(category_id)):
+            raise Exception("Not Found")  # todo
 
-        if check.get("error") and check.get("msg") and "Подождите" in check.get("msg"):
-            wait_time = utils.parse_wait_time(check.get("msg"))
-            return types.RaiseResponse(False, wait_time, [], check)
-        elif check.get("error"):
-            # Если вернулся ответ с ошибкой и это не "Подождите n времени" - значит творится какая-то дичь.
-            return types.RaiseResponse(False, 10, [], check)
-        elif check.get("error") is not None and not check.get("error"):
-            # Если была всего 1 категория и FunPay ее поднял без отправки modal-окна
-            return types.RaiseResponse(True, 3600,
-                                       [self.get_subcategory(types.SubCategoryTypes.COMMON, subcategory_id)], check)
-        elif check.get("modal"):
-            # Если же появилась модалка,
-            # парсим все чекбоксы и отправляем запрос на поднятие всех категорий, кроме тех,
-            # которые в exclude.
-            parser = BeautifulSoup(check.get("modal"), "html.parser")
-            subcategories = []
-            checkboxes = parser.find_all("div", {"class": "checkbox"})
-            for cb in checkboxes:
-                subcategory_id = int(cb.find("input")["value"])
-                if exclude is None or subcategory_id not in exclude:
-                    subcategories.append(self.get_subcategory(types.SubCategoryTypes.COMMON, subcategory_id))
+        exclude = exclude or []
+        if subcategories:
+            subcats = []
+            for i in subcategories:
+                if isinstance(i, types.SubCategory):
+                    if i.type is types.SubCategoryTypes.COMMON and i.category.id == category.id and i.id not in exclude:
+                        subcats.append(i)
+                else:
+                    if not (subcat := category.get_subcategory(types.SubCategoryTypes.COMMON, i)):
+                        continue
+                    subcats.append(subcat)
+        else:
+            subcats = [i for i in category.get_subcategories() if i.type is types.SubCategoryTypes.COMMON and i.id not in exclude]
 
-            headers = {
-                "accept": "*/*",
-                "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "x-requested-with": "XMLHttpRequest"
-            }
-            payload = {
-                "game_id": category_id,
-                "node_id": subcategory_id,
-                "node_ids[]": [i.id for i in subcategories]
-            }
+        headers = {
+            "accept": "*/*",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest"
+        }
+        payload = {
+            "game_id": category_id,
+            "node_id": subcats[0].id,
+            "node_ids[]": [i.id for i in subcats]
+        }
 
-            response = self.method("post", "https://funpay.com/lots/raise", headers, payload, raise_not_200=True)
-            json_response = response.json()
-            logger.debug(f"Ответ FunPay (поднятие категорий): {json_response}.")
-            if not json_response.get("error"):
-                return types.RaiseResponse(True, 3600, subcategories, json_response)
-            else:
-                return types.RaiseResponse(False, 10, [], json_response)
+        response = self.method("post", "lots/raise", headers, payload, raise_not_200=True)
+        json_response = response.json()
+        logger.debug(f"Ответ FunPay (поднятие категорий): {json_response}.")
+        if not json_response.get("error"):
+            return True
+        elif json_response.get("error") and json_response.get("msg") and "Подождите" in json_response.get("msg"):
+            wait_time = utils.parse_wait_time(json_response.get("msg"))
+            raise exceptions.RaiseError(response, category, json_response.get("MSG"), wait_time)
+        else:
+            raise exceptions.RaiseError(response, category, None, None)
 
     def get_user(self, user_id: int) -> types.UserProfile:
         """
@@ -595,14 +702,10 @@ class Account:
         :return: объект профиля пользователя.
         :rtype: :class:`FunPayAPI.types.UserProfile`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
-        headers = {
-            "accept": "*/*"
-        }
-
-        response = self.method("get", f"https://funpay.com/users/{user_id}/", headers, {}, raise_not_200=True)
+        response = self.method("get", f"users/{user_id}/", {"accept": "*/*"}, {}, raise_not_200=True)
         html_response = response.content.decode()
         parser = BeautifulSoup(html_response, "html.parser")
 
@@ -661,12 +764,10 @@ class Account:
         :return: объект чата.
         :rtype: :class:`FunPayAPI.types.Chat`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
-        headers = {
-            "accept": "*/*"
-        }
-        response = self.method("get", f"https://funpay.com/chat/?node={chat_id}", headers, {}, raise_not_200=True)
+
+        response = self.method("get", f"chat/?node={chat_id}", {"accept": "*/*"}, {}, raise_not_200=True)
         html_response = response.content.decode()
         parser = BeautifulSoup(html_response, "html.parser")
         if (name := parser.find("div", {"class": "chat-header"}).find("div", {"class": "media-user-name"}).find("a").text) == "Чат":
@@ -691,12 +792,12 @@ class Account:
         :return: объекст заказа.
         :rtype: :class:`FunPayAPI.types.Order`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
         headers = {
             "accept": "*/*"
         }
-        response = self.method("get", f"https://funpay.com/orders/{order_id}/", headers, {}, raise_not_200=True)
+        response = self.method("get", f"orders/{order_id}/", headers, {}, raise_not_200=True)
         html_response = response.content.decode()
         parser = BeautifulSoup(html_response, "html.parser")
         username = parser.find("div", {"class": "user-link-name"})
@@ -767,7 +868,10 @@ class Account:
 
     def get_sales(self, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
                   include_refunded: bool = True, exclude_ids: list[str] | None = None,
-                  **filters) -> tuple[str | None, list[types.OrderShortcut]]:
+                  id: Optional[int] = None, buyer: Optional[str] = None,
+                  state: Optional[Literal["closed", "paid", "refunded"]] = None, game: Optional[int] = None,
+                  section: Optional[str] = None, server: Optional[int] = None,
+                  side: Optional[int] = None, **more_filters) -> tuple[str | None, list[types.OrderShortcut]]:
         """
         Получает и парсит список заказов со страницы https://funpay.com/orders/trade
 
@@ -786,33 +890,44 @@ class Account:
         :param exclude_ids: исключить заказы с ID из списка (ID заказа должен быть без '#'!).
         :type exclude_ids: :obj:`list` of :obj:`str`, опционально
 
-        :param filters: фильтры FunPay.\n
-            * id (:obj:`int`): ID заказа.\n
-            * buyer (:obj:`str`): никнейм покупателя.\n
-            * state (:obj:`str`): состояние заказа:\n
+        :param id: ID заказа.
+        :type id: :obj:`int`, опционально
 
-                * paid - оплачен и ожидает выполнения.\n
-                * closed - выполнен.\n
-                * refunded - запрошен возврат средств.\n
+        :param buyer: никнейм покупателя.
+        :type buyer: :obj:`str`, опционально
 
-            * game (:obj:`int`): ID игры.\n
-            * section (:obj:`str`): ID категории в формате <тип лота>-<ID категории>.\n
+        :param state: статус заказа.
+        :type: :obj:`str` `paid`, `closed` or `refunded`, опционально
 
-                * lot - стандартный лот (например: lot-256)\n
-                * chip - игровая валюта (например: chip-4471)\n
+        :param game: ID игры.
+        :type game: :obj:`int`, опционально
 
-            * server (:obj:`int`): ID сервера.\n
-            * side (:obj:`int`): ID стороны (платформы).
+        :param section: ID категории в формате `<тип лота>-<ID категории>`.\n
+            Типы лотов:\n
+            * `lot` - стандартный лот (например: `lot-256`)\n
+            * `chip` - игровая валюта (например: `chip-4471`)\n
+        :type section: :obj:`str`, опционально
+
+        :param server: ID сервера.
+        :type server: :obj:`int`, опционально
+
+        :param side: ID стороны (платформы).
+        :type side: :obj:`int`, опционально.
+
+        :param more_filters: доп. фильтры.
 
         :return: (ID след. заказа (для start_from), список заказов)
         :rtype: :obj:`tuple` (:obj:`str` or :obj:`None`, :obj:`list` of :class:`FunPayAPI.types.OrderShortcut`)
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         exclude_ids = exclude_ids or []
-        link = "https://funpay.com/orders/trade?"
+        filters = {"id": id, "buyer": buyer, "state": state, "game": game, "section": section, "server": server,
+                   "side": side}
+        filters = {name: filters[name] for name in filters if filters[name]}
 
+        link = "https://funpay.com/orders/trade?"
         for name in filters:
             link += f"{name}={filters[name]}&"
         link = link[:-1]
@@ -829,10 +944,7 @@ class Account:
             raise exceptions.UnauthorizedError(response)
 
         next_order_id = parser.find("input", {"type": "hidden", "name": "continue"})
-        if not next_order_id:
-            next_order_id = None
-        else:
-            next_order_id = next_order_id.get("value")
+        next_order_id = next_order_id.get("value") if next_order_id else None
 
         order_divs = parser.find_all("a", {"class": "tc-item"})
         if not order_divs:
@@ -938,7 +1050,7 @@ class Account:
         :return: словарь с сохраненными чатами.
         :rtype: :obj:`dict` {:obj:`int`: :class:`FunPayAPi.types.ChatShortcut`}
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
         if update:
             chats = self.request_chats()
@@ -958,7 +1070,7 @@ class Account:
         :return: объект чата или :obj:`None`, если чат не был найден.
         :rtype: :class:`FunPayAPI.types.ChatShortcut` or :obj:`None`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         for i in self.__saved_chats:
@@ -973,7 +1085,7 @@ class Account:
 
     def get_chat_by_id(self, chat_id: int, make_request: bool = False) -> types.ChatShortcut | None:
         """
-        Возвращает чат по его ID (если он сохранен).
+        Возвращает личный чат по его ID (если он сохранен).
 
         :param chat_id: ID чата.
         :type chat_id: :obj:`int`
@@ -984,7 +1096,7 @@ class Account:
         :return: объект чата или :obj:`None`, если чат не был найден.
         :rtype: :class:`FunPayAPI.types.ChatShortcut` or :obj:`None`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
 
         if not make_request or chat_id in self.__saved_chats:
@@ -993,64 +1105,35 @@ class Account:
         self.add_chats(self.request_chats())
         return self.get_chat_by_id(chat_id)
 
-    def get_lot_fields(self, lot_id: int, subcategory_id: int) -> types.LotFields:
+    def get_lot_fields(self, lot_id: int) -> types.LotFields:
         """
         Получает все поля лота.
 
         :param lot_id: ID лота.
         :type lot_id: :obj:`int`
 
-        :param subcategory_id: подкатегория лота.
-        :type subcategory_id: :obj:`int`
-
         :return: объект с полями лота.
         :rtype: :class:`FunPayAPI.types.LotFields`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
         headers = {
             "accept": "*/*",
             "content-type": "application/json",
             "x-requested-with": "XMLHttpRequest",
         }
-        query = f"?tag={utils.random_tag()}&offer={lot_id}&node={subcategory_id}"
-        response = self.method("get", f"https://funpay.com/lots/offerEdit{query}", headers, {}, raise_not_200=True)
+        response = self.method("get", f"lots/offerEdit?offer={lot_id}", headers, {}, raise_not_200=True)
 
         json_response = response.json()
-        parser = BeautifulSoup(json_response["html"], "html.parser")
+        bs = BeautifulSoup(json_response["html"], "html.parser")
 
-        input_fields = parser.find_all("input")
-        text_fields = parser.find_all("textarea")
-        selection_fields = parser.find_all("select")
-        checkboxes = parser.find_all("input", {"type": "checkbox"}, checked=True)
-        result = {}
-
-        for field in input_fields:
-            name = field["name"]
-            if name in ["active", "deactivate_after_sale"]:
-                continue
-            else:
-                result[name] = field.get("value") or ""
-
-        for field in text_fields:
-            name = field["name"]
-            result[name] = field.text or ""
-
-        for field in selection_fields:
-            name = field["name"]
-            result[name] = field.find("option", selected=True)["value"]
-
-        for field in checkboxes:
-            name = field["name"]
-            if name == "active":
-                result[name] = "on"
-            elif name == "deactivate_after_sale":
-                result["deactivate_after_sale[]"] = "on"
-
-        if "deactivate_after_sale[]" not in result:
-            result["deactivate_after_sale"] = ""
-
-        return types.LotFields(lot_id, subcategory_id, result)
+        result = {"active": "", "deactivate_after_sale": ""}
+        result.update({field["name"]: field.get("value") or "" for field in bs.find_all("input")
+                       if field["name"] not in ["active", "deactivate_after_sale"]})
+        result.update({field["name"]: field.text or "" for field in bs.find_all("textarea")})
+        result.update({field["name"]: field.find("option", selected=True)["value"] for field in bs.find_all("select")})
+        result.update({field["name"]: "on" for field in bs.find_all("input", {"type": "checkbox"}, checked=True)})
+        return types.LotFields(lot_id, result)
 
     def save_lot(self, lot_fields: types.LotFields):
         """
@@ -1059,21 +1142,20 @@ class Account:
         :param lot_fields: объект с полями лота.
         :type lot_fields: :class:`FunPayAPI.types.LotFields`
         """
-        if not self.is_initiated():
+        if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
         headers = {
             "accept": "*/*",
             "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
             "x-requested-with": "XMLHttpRequest",
         }
-        fields = lot_fields.renew_fields().get_fields()
+        fields = lot_fields.renew_fields().fields
         fields["location"] = "trade"
 
-        response = self.method("post", "https://funpay.com/lots/offerSave", headers, fields, raise_not_200=True)
+        response = self.method("post", "lots/offerSave", headers, fields, raise_not_200=True)
         json_response = response.json()
         if json_response.get("error"):
-            raise exceptions.LotSavingError(response, json_response.get("error"), lot_fields.lot_id,
-                                            lot_fields.subcategory_id)
+            raise exceptions.LotSavingError(response, json_response.get("error"), lot_fields.lot_id)
 
     def get_category(self, category_id: int) -> types.Category | None:
         """
@@ -1087,7 +1169,8 @@ class Account:
         """
         return self.__sorted_categories.get(category_id)
 
-    def get_categories(self) -> list[types.Category]:
+    @property
+    def categories(self) -> list[types.Category]:
         """
         Возвращает все категории (игры) FunPay (парсятся при первом выполнении метода :meth:`FunPayAPI.account.Account.get`).
 
@@ -1122,7 +1205,8 @@ class Account:
         """
         return self.__sorted_subcategories[subcategory_type].get(subcategory_id)
 
-    def get_subcategories(self) -> list[types.SubCategory]:
+    @property
+    def subcategories(self) -> list[types.SubCategory]:
         """
         Возвращает все подкатегории FunPay (парсятся при первом выполнении метода Account.get).
 
@@ -1131,16 +1215,17 @@ class Account:
         """
         return self.__subcategories
 
-    def get_sorted_subcategories(self) -> dict[types.SubCategoryTypes, dict[int | str, types.SubCategory]]:
+    def get_sorted_subcategories(self) -> dict[types.SubCategoryTypes, dict[int, types.SubCategory]]:
         """
         Возвращает все подкатегории FunPay в виде словаря {тип подкатегории: {ID: подкатегория}}
         (парсятся при первом выполнении метода Account.get).
 
         :return: все подкатегории FunPay в виде словаря {тип подкатегории: {ID: подкатегория}}
-        :rtype: :obj:`dict` {:class:`FunPayAPI.common.enums.SubCategoryTypes`: :obj:`dict` {:obj:`int` or :obj:`str`: :class:`FunPayAPI.types.SubCategory`}}
+        :rtype: :obj:`dict` {:class:`FunPayAPI.common.enums.SubCategoryTypes`: :obj:`dict` {:obj:`int` :class:`FunPayAPI.types.SubCategory`}}
         """
         return self.__sorted_subcategories
 
+    @property
     def is_initiated(self) -> bool:
         """
         Инициализирован ли класс :class:`FunPayAPI.account.Account` с помощью метода :meth:`FunPayAPI.account.Account.get`?
@@ -1170,8 +1255,8 @@ class Account:
             game_id = int(i.find("div", {"class": "game-title"}).get("data-id"))
             game_title = i.find("a").text
             game_obj = types.Category(game_id, game_title)
-            subcategories_divs = i.find_all("li")
 
+            subcategories_divs = i.find_all("li")
             for j in subcategories_divs:
                 subcategory_name = j.find("a").text
                 link = j.find("a").get("href")
@@ -1187,15 +1272,12 @@ class Account:
             self.__sorted_categories[game_id] = game_obj
 
     def __parse_messages(self, json_messages: dict, chat_id: int | str,
-                         interlocutor_id: int, interlocutor_username: str | None,
+                         interlocutor_id: Optional[int] = None, interlocutor_username: Optional[str] = None,
                          from_id: int = 0) -> list[types.Message]:
         messages = []
-
-        ids = {
-            self.id: self.username,
-            0: "FunPay",
-            interlocutor_id: interlocutor_username
-        }
+        ids = {self.id: self.username, 0: "FunPay"}
+        if interlocutor_id is not None:
+            ids[interlocutor_id] = interlocutor_username
 
         for i in json_messages:
             if i["id"] < from_id:
@@ -1203,17 +1285,18 @@ class Account:
             author_id = i["author"]
             parser = BeautifulSoup(i["html"], "html.parser")
             # Если ник написавшего неизвестен, но он есть в HTML-коде сообщения
-            if not ids.get(author_id) and (author_div := parser.find("div", {"class": "media-user-name"})):
+            if ids.get(author_id) is None and (author_div := parser.find("div", {"class": "media-user-name"})):
                 author = author_div.find("a").text.strip()
                 ids[author_id] = author
-                if author_id == interlocutor_id and not interlocutor_username:
+                if isinstance(chat_id, int) and author_id == interlocutor_id and not interlocutor_username:
                     interlocutor_username = author
                     ids[interlocutor_id] = interlocutor_username
 
-            if image_link := parser.find("a", {"class": "chat-img-link"}):
+            if isinstance(chat_id, int) and (image_link := parser.find("a", {"class": "chat-img-link"})):
                 image_link = image_link.get("href")
                 message_text = None
             else:
+                image_link = None
                 if author_id == 0:
                     message_text = parser.find("div", {"class": "alert alert-with-icon alert-info"}).text.strip()
                 else:
@@ -1234,5 +1317,4 @@ class Account:
             i.chat_name = interlocutor_username
             debug_text += f"{i.author} | {i.author_id} | {str(i)[:20]} /\\"
         logger.debug(debug_text)
-
         return messages

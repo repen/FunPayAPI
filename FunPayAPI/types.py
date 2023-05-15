@@ -485,17 +485,12 @@ class LotFields:
     :param lot_id: ID лота.
     :type lot_id: :obj:`int`
 
-    :param subcategory_id: ID категории (игры), к которой относится лот.
-    :type subcategory_id: :obj:`int`
-
     :param fields: словарь с полями.
     :type fields: :obj:`dict`
     """
-    def __init__(self, lot_id: int, subcategory_id: int, fields: dict):
+    def __init__(self, lot_id: int, fields: dict):
         self.lot_id: int = lot_id
         """ID лота."""
-        self.subcategory_id: int = subcategory_id
-        """ID подкатегории, к которой относится лот."""
         self.__fields: dict = fields
         """Поля лота."""
 
@@ -516,7 +511,8 @@ class LotFields:
         self.deactivate_after_sale: bool = "deactivate_after_sale[]" in self.__fields
         """Деактивировать ли лот после продажи."""
 
-    def get_fields(self) -> dict[str, str]:
+    @property
+    def fields(self) -> dict[str, str]:
         """
         Возвращает все поля лота в виде словаря.
 
@@ -532,8 +528,7 @@ class LotFields:
         :param fields: поля лота, которые нужно заменить, и их значения.
         :type fields: obj:`dict` {:obj:`str`: :obj:`str`}
         """
-        for i in fields:
-            self.__fields[i] = fields[i]
+        self.__fields.update(fields)
 
     def set_fields(self, fields: dict):
         """
@@ -559,26 +554,9 @@ class LotFields:
         self.__fields["fields[desc][ru]"] = self.description_ru
         self.__fields["fields[desc][en]"] = self.description_en
         self.__fields["price"] = str(self.price) if self.price is not None else ""
-        if self.amount is not None:
-            self.__fields["amount"] = str(self.amount)
-        else:
-            if "amount" in self.__fields:
-                self.__fields.pop("amount")
-
-        if self.active:
-            self.__fields["active"] = "on"
-        else:
-            if "active" in self.__fields:
-                self.__fields.pop("active")
-
-        if self.deactivate_after_sale:
-            if "deactivate_after_sale" in self.__fields:
-                self.__fields.pop("deactivate_after_sale")
-            self.__fields["deactivate_after_sale[]"] = "on"
-        else:
-            if "deactivate_after_sale[]" in self.__fields:
-                self.__fields.pop("deactivate_after_sale[]")
-            self.__fields["deactivate_after_sale"] = ""
+        self.__fields["deactivate_after_sale"] = "on" if self.deactivate_after_sale else ""
+        self.__fields["active"] = "on" if self.active else ""
+        self.__fields["amount"] = self.amount if self.amount is not None else ""
         return self
 
 
@@ -817,28 +795,36 @@ class Review:
         """ID автора отзыва."""
 
 
-class RaiseResponse:
+class Balance:
     """
-    Данный класс представляет ответ FunPay на запрос о поднятии лотов.
+    Данный класс представляет информацию о балансе аккаунта.
 
-    :param complete: удалось ли поднять лоты?
-    :type complete: :obj:`bool`
+    :param total_rub: общий рублёвый баланс.
+    :type total_rub: :obj:`float`
 
-    :param wait: примерное время ожидания до следующего поднятия.
-    :type wait: :obj:`int`
+    :param available_rub: доступный к выводу рублёвый баланс.
+    :type available_rub: :obj:`float`
 
-    :param raised_subcategories: список объектов поднятых подкатегорий.
-    :type raised_subcategories: :obj:`list` of :class:`FunPayAPI.types.SubCategory`
+    :param total_usd: общий долларовый баланс.
+    :type total_usd: :obj:`float`
 
-    :param funpay_response: полный ответ Funpay.
-    :type funpay_response: :obj:`dict`
+    :param available_usd: доступный к выводу долларовый баланс.
+    :type available_usd: :obj:`float`
+
+    :param total_eur: общий евро баланс.
+    :param available_eur: :obj:`float`
     """
-    def __init__(self, complete: bool, wait: int, raised_subcategories: list[SubCategory], funpay_response: dict):
-        self.complete: bool = complete
-        """Удалось ли поднять лоты."""
-        self.wait: int = wait
-        """Примерное время ожидания до след. поднятия."""
-        self.raised_subcategories: list[SubCategory] = raised_subcategories
-        """Список объектов поднятых подкатегорий."""
-        self.funpay_response: dict = funpay_response
-        """Полный ответ FunPay."""
+    def __init__(self, total_rub: float, available_rub: float, total_usd: float, available_usd: float,
+                 total_eur: float, available_eur: float):
+        self.total_rub: float = total_rub
+        """Общий рублёвый баланс."""
+        self.available_rub: float = available_rub
+        """Доступный к выводу рублёвый баланс."""
+        self.total_usd: float = total_usd
+        """Общий долларовый баланс."""
+        self.available_usd: float = available_usd
+        """Доступный к выводу долларовый баланс."""
+        self.total_eur: float = total_eur
+        """Общий евро баланс."""
+        self.available_eur: float = available_eur
+        """Доступный к выводу евро баланс."""
