@@ -287,7 +287,7 @@ class Runner:
         while attempts:
             attempts -= 1
             try:
-                orders_list = self.account.get_sales()
+                orders_list = self.account.get_sells()
                 break
             except exceptions.RequestFailedError as e:
                 logger.error(e)

@@ -5,6 +5,7 @@ if TYPE_CHECKING:
 
 from requests_toolbelt import MultipartEncoder
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 import requests
 import logging
 import random
@@ -866,7 +867,7 @@ class Account:
                             buyer_id, buyer_username, seller_id, seller_username, html_response, review)
         return order
 
-    def get_sales(self, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
+    def get_sells(self, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
                   include_refunded: bool = True, exclude_ids: list[str] | None = None,
                   id: Optional[int] = None, buyer: Optional[str] = None,
                   state: Optional[Literal["closed", "paid", "refunded"]] = None, game: Optional[int] = None,
@@ -926,6 +927,7 @@ class Account:
         filters = {"id": id, "buyer": buyer, "state": state, "game": game, "section": section, "server": server,
                    "side": side}
         filters = {name: filters[name] for name in filters if filters[name]}
+        filters.update(more_filters)
 
         link = "https://funpay.com/orders/trade?"
         for name in filters:
@@ -976,9 +978,32 @@ class Account:
             buyer_div = div.find("div", {"class": "media-user-name"}).find("span")
             buyer_username = buyer_div.text
             buyer_id = int(buyer_div.get("data-href")[:-1].split("https://funpay.com/users/")[1])
+            subcategory_name = div.find("div", {"class": "text-muted"}).text
+
+            now = datetime.now()
+            order_date_text = div.find("div", {"class": "tc-date-time"}).text
+            if "сегодня" in order_date_text:  # сегодня, ЧЧ:ММ
+                h, m = order_date_text.split(", ")[1].split(":")
+                order_date = datetime(now.year, now.month, now.day, int(h), int(m))
+            elif "вчера" in order_date_text:  # вчера, ЧЧ:ММ
+                h, m = order_date_text.split(", ")[1].split(":")
+                temp = now - timedelta(days=1)
+                order_date = datetime(temp.year, temp.month, temp.day, int(h), int(m))
+            elif order_date_text.count(" ") == 2:  # ДД месяца, ЧЧ:ММ
+                split = order_date_text.split(", ")
+                day, month = split[0].split()
+                day, month = int(day), utils.MONTHS[month]
+                h, m = split[1].split(":")
+                order_date = datetime(now.year, month, day, int(h), int(m))
+            else:  # ДД месяца ГГГГ, ЧЧ:ММ
+                split = order_date_text.split(", ")
+                day, month, year = split[0].split()
+                day, month, year = int(day), utils.MONTHS[month], int(year)
+                h, m = split[1].split(":")
+                order_date = datetime(year, month, day, int(h), int(m))
 
             order_obj = types.OrderShortcut(order_id, description, price, buyer_username, buyer_id, order_status,
-                                            str(div))
+                                            order_date, subcategory_name, str(div))
             sells.append(order_obj)
 
         return next_order_id, sells

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, overload, Optional
 from .common.utils import RegularExpressions
 from .common.enums import MessageTypes, OrderStatuses, SubCategoryTypes
+import datetime
 
 
 class ChatShortcut:
@@ -256,6 +257,12 @@ class OrderShortcut:
     :param status: статус заказа.
     :type status: :class:`FunPayAPI.common.enums.OrderStatuses`
 
+    :param date: дата создания заказа.
+    :type date: :class:`datetime.datetime`
+
+    :param subcategory_name: название подкатегории, к которой относится заказ.
+    :type subcategory_name: :obj:`str`
+
     :param html: HTML код виджета заказа.
     :type html: :obj:`str`
 
@@ -264,7 +271,7 @@ class OrderShortcut:
     """
     def __init__(self, id_: str, description: str, price: float,
                  buyer_username: str, buyer_id: int, status: OrderStatuses,
-                 html: str, dont_search_amount: bool = False):
+                 date: datetime.datetime, subcategory_name: str, html: str, dont_search_amount: bool = False):
         self.id: str = id_ if not id_.startswith("#") else id_[1:]
         """ID заказа."""
         self.description: str = description
@@ -279,6 +286,10 @@ class OrderShortcut:
         """ID покупателя."""
         self.status: OrderStatuses = status
         """Статус заказа."""
+        self.date: datetime.datetime = date
+        """Дата создания заказа."""
+        self.subcategory_name: str = subcategory_name
+        """Название подкатегории, к которой относится заказ."""
         self.html: str = html
         """HTML код виджета заказа."""
 
