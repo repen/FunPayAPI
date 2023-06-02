@@ -81,6 +81,9 @@ class Account:
             types.SubCategoryTypes.CURRENCY: {}
         }
 
+        self.__bot_character = "⁤"
+        """Если сообщение начинается с этого символа, значит оно отправлено ботом."""
+
     def method(self, request_method: Literal["post", "get"], api_method: str, headers: dict, payload: Any,
                exclude_phpsessid: bool = False, raise_not_200: bool = False) -> requests.Response:
         """
@@ -369,7 +372,7 @@ class Account:
             request["data"]["image_id"] = image_id
             request["data"]["content"] = ""
         else:
-            request["data"]["content"] = text or ""
+            request["data"]["content"] = f"{self.__bot_character}{text}" if text else ""
 
         objects = [
             {
@@ -400,14 +403,14 @@ class Account:
                 image_link = image_link.get("href")
                 message_text = None
             else:
-                message_text = parser.find("div", {"class": "message-text"}).text
+                message_text = parser.find("div", {"class": "message-text"}).text.replace(self.__bot_character, "", 1)
         except Exception as e:
             logger.debug("SEND_MESSAGE RESPONSE")
             logger.debug(response.content.decode())
             raise e
 
-        message_obj = types.Message(int(mes["id"]), message_text, chat_id, chat_name,
-                                    self.username, self.id, mes["html"], image_link)
+        message_obj = types.Message(int(mes["id"]), message_text, chat_id, chat_name, self.username, self.id,
+                                    mes["html"], image_link)
         if self.runner and isinstance(chat_id, int):
             if add_to_ignore_list:
                 self.runner.mark_as_by_bot(chat_id, message_obj.id)
@@ -1327,8 +1330,15 @@ class Account:
                 else:
                     message_text = parser.find("div", {"class": "message-text"}).text
 
+            by_bot = False
+            if message_text.startswith(self.__bot_character):
+                message_text = message_text.replace(self.__bot_character, "", 1)
+                by_bot = True
+
             message_obj = types.Message(i["id"], message_text, chat_id, interlocutor_username,
                                         None, author_id, i["html"], image_link, determine_msg_type=False)
+            message_obj.by_bot = by_bot
+
             if author_id != 0:
                 message_obj.type = types.MessageTypes.NON_SYSTEM
             else:
@@ -1343,3 +1353,7 @@ class Account:
             debug_text += f"{i.author} | {i.author_id} | {str(i)[:20]} /\\"
         logger.debug(debug_text)
         return messages
+
+    @property
+    def bot_character(self) -> str:
+        return self.__bot_character

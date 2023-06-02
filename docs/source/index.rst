@@ -36,6 +36,7 @@ GitHub: `GitHub <https://github.com/woopertail/FunPayAPI>`_
 
    install
    quickstart
+   HOW_chats
    account
    runner
    types
