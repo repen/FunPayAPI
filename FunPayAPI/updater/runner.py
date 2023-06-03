@@ -168,7 +168,10 @@ class Runner:
             # Если чат удален админами - скип.
             if not (last_msg_text := chat.find("div", {"class": "contact-item-message"})):
                 continue
+
             last_msg_text = last_msg_text.text
+            if last_msg_text.startswith(self.account.bot_character):
+                last_msg_text = last_msg_text.replace(self.account.bot_character, "", 1)
             last_msg_time = chat.find("div", {"class": "contact-item-time"}).text
 
             # Если текст последнего сообщения совпадает с сохраненным
