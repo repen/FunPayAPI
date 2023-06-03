@@ -166,6 +166,54 @@ class Account:
         self.__initiated = True
         return self
 
+    def get_subcategory_public_lots(self, subcategory_type: enums.SubCategoryTypes, subcategory_id: int) -> list[types.LotShortcut]:
+        """
+        Получает список всех опубликованных лотов переданной подкатегории.
+
+        :param subcategory_type: тип подкатегории.
+        :type subcategory_type: :class:`FunPayAPI.enums.SubCategoryTypes`
+
+        :param subcategory_id: ID подкатегории.
+        :type subcategory_id: :obj:`int`
+
+        :return: список всех опубликованных лотов переданной подкатегории.
+        :rtype: :obj:`list` of :class:`FunPayAPI.types.LotShortcut`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+
+        meth = f"lots/{subcategory_id}/" if subcategory_type is enums.SubCategoryTypes.COMMON else f"chips/{subcategory_id}/"
+        response = self.method("get", meth, {"accept": "*/*"}, {}, raise_not_200=True)
+        html_response = response.content.decode()
+        parser = BeautifulSoup(html_response, "html.parser")
+
+        username = parser.find("div", {"class": "user-link-name"})
+        if not username:
+            raise exceptions.UnauthorizedError(response)
+
+        offers = parser.find_all("a", {"class": "tc-item"})
+        if not offers:
+            return []
+
+        subcategory_obj = self.get_subcategory(subcategory_type, subcategory_id)
+        result = []
+        for offer in offers:
+            offer_id = offer["href"].split("id=")[1]
+            description = offer.find("div", {"class": "tc-desc-text"})
+            description = description.text if description else None
+            server = offer.find("div", {"class": "tc-server hidden-xxs"})
+            if not server:
+                server = offer.find("div", {"class": "tc-server hidden-xs"})
+            server = server.text if server else None
+
+            if subcategory_type is types.SubCategoryTypes.COMMON:
+                price = float(offer.find("div", {"class": "tc-price"})["data-s"])
+            else:
+                price = float(offer.find("div", {"class": "tc-price"}).find("div").text.split()[0])
+            lot_obj = types.LotShortcut(offer_id, server, description, price, subcategory_obj, str(offer))
+            result.append(lot_obj)
+        return result
+
     def get_balance(self, lot_id: int = 18853876) -> types.Balance:
         """
         Получает информацию о балансе пользователя.
