@@ -12,12 +12,14 @@ import random
 import string
 import json
 import time
+import re
 
 from . import types
 from .common import exceptions, utils, enums
 
 
 logger = logging.getLogger("FunPayAPI.account")
+PRIVATE_CHAT_ID_RE = re.compile(r"users-\d+-\d+$")
 
 
 class Account:
@@ -1352,6 +1354,7 @@ class Account:
                          from_id: int = 0) -> list[types.Message]:
         messages = []
         ids = {self.id: self.username, 0: "FunPay"}
+        badges = {}
         if interlocutor_id is not None:
             ids[interlocutor_id] = interlocutor_username
 
@@ -1360,15 +1363,20 @@ class Account:
                 continue
             author_id = i["author"]
             parser = BeautifulSoup(i["html"], "html.parser")
-            # Если ник написавшего неизвестен, но он есть в HTML-коде сообщения
-            if ids.get(author_id) is None and (author_div := parser.find("div", {"class": "media-user-name"})):
-                author = author_div.find("a").text.strip()
-                ids[author_id] = author
-                if isinstance(chat_id, int) and author_id == interlocutor_id and not interlocutor_username:
-                    interlocutor_username = author
-                    ids[interlocutor_id] = interlocutor_username
 
-            if isinstance(chat_id, int) and (image_link := parser.find("a", {"class": "chat-img-link"})):
+            # Если ник или бейдж написавшего неизвестен, но есть блок с данными об авторе сообщения
+            if None in [ids.get(author_id), badges.get(author_id)] and (author_div := parser.find("div", {"class": "media-user-name"})):
+                if badges.get(author_id) is None:
+                    badge = author_div.find("span")
+                    badges[author_id] = badge.text if badge else 0
+                if ids.get(author_id) is None:
+                    author = author_div.find("a").text.strip()
+                    ids[author_id] = author
+                    if self.chat_id_private(chat_id) and author_id == interlocutor_id and not interlocutor_username:
+                        interlocutor_username = author
+                        ids[interlocutor_id] = interlocutor_username
+
+            if self.chat_id_private and (image_link := parser.find("a", {"class": "chat-img-link"})):
                 image_link = image_link.get("href")
                 message_text = None
             else:
@@ -1379,28 +1387,25 @@ class Account:
                     message_text = parser.find("div", {"class": "message-text"}).text
 
             by_bot = False
-            if message_text.startswith(self.__bot_character):
+            if not image_link and message_text.startswith(self.__bot_character):
                 message_text = message_text.replace(self.__bot_character, "", 1)
                 by_bot = True
 
             message_obj = types.Message(i["id"], message_text, chat_id, interlocutor_username,
                                         None, author_id, i["html"], image_link, determine_msg_type=False)
             message_obj.by_bot = by_bot
-
-            if author_id != 0:
-                message_obj.type = types.MessageTypes.NON_SYSTEM
-            else:
-                message_obj.type = message_obj.get_message_type()
+            message_obj.type = types.MessageTypes.NON_SYSTEM if author_id != 0 else message_obj.get_message_type()
             messages.append(message_obj)
 
-        # todo
-        debug_text = ""
         for i in messages:
             i.author = ids.get(i.author_id)
             i.chat_name = interlocutor_username
-            debug_text += f"{i.author} | {i.author_id} | {str(i)[:20]} /\\"
-        logger.debug(debug_text)
+            i.badge = badges.get(i.author_id) if badges.get(i.author_id) != 0 else None
         return messages
+
+    @staticmethod
+    def chat_id_private(chat_id: int | str):
+        return isinstance(chat_id, int) or PRIVATE_CHAT_ID_RE.fullmatch(chat_id)
 
     @property
     def bot_character(self) -> str:

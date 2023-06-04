@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 
 setup(name='FunPayAPI',
-      version="1.0.9",
+      version="1.1.0",
       description='Прослойка между FunPayAPI и клиентом.',
       long_description=long_desc,
       long_description_content_type="text/markdown",
@@ -21,6 +21,6 @@ setup(name='FunPayAPI',
           'Development Status :: 5 - Production/Stable',
           'Programming Language :: Python :: 3',
           'Environment :: Console',
-          'License :: OSI Approved :: GNU General Public License v2 (GPLv2)',
+          'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
       ]
 )
