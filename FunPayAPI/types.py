@@ -6,6 +6,7 @@ from typing import Literal, overload, Optional
 from .common.utils import RegularExpressions
 from .common.enums import MessageTypes, OrderStatuses, SubCategoryTypes
 import datetime
+import json
 
 
 class ChatShortcut:
@@ -616,6 +617,21 @@ class LotShortcut:
         self.public_link: str = f"https://funpay.com/chips/offer?id={self.id}" \
             if self.subcategory.type is SubCategoryTypes.CURRENCY else f"https://funpay.com/lots/offer?id={self.id}"
         """Публичная ссылка на лот."""
+
+    def __str__(self):
+        return json.dumps({
+            "id": self.id,
+            "server": self.server,
+            "description": self.description,
+            "title": self.title,
+            "price": self.price,
+            "subcategory_id": self.subcategory.id,
+            "subcategory_name": self.subcategory.name,
+            "subcategory_fullname": self.subcategory.fullname,
+            "subcategory_type": self.subcategory.type.value,
+            "subcategory_public_link": self.subcategory.public_link,
+            "public_link": self.public_link
+        }, indent=2, ensure_ascii=False)
 
     def __lt__(self, other):
         if not isinstance(other, LotShortcut):
