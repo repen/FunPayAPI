@@ -6,13 +6,13 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 
 setup(name='FunPayAPI',
-      version="1.1.0",
+      version="1.1.1",
       description='Прослойка между FunPayAPI и клиентом.',
       long_description=long_desc,
       long_description_content_type="text/markdown",
-      author='Woopertail',
-      author_email='woopertail@gmail.com',
-      url='https://github.com/woopertail/FunPayAPI',
+      author='Andrey',
+      author_email='9keepa@gmail.com',
+      url='https://github.com/repen/FunPayAPI',
       packages=find_packages("."),
       license='GPL3',
       keywords='funpay bot api tools',
