@@ -9,3 +9,6 @@ __pycache__/
 
 # Sphinx
 docs/build/
+FunPayAPI.egg-info
+dist
+build
