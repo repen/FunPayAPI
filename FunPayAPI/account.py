@@ -201,6 +201,7 @@ class Account:
         result = []
         for offer in offers:
             offer_id = offer["href"].split("id=")[1]
+            owner = offer.select_one(".media-user-name span").text
             description = offer.find("div", {"class": "tc-desc-text"})
             description = description.text if description else None
             server = offer.find("div", {"class": "tc-server hidden-xxs"})
@@ -212,7 +213,7 @@ class Account:
                 price = float(offer.find("div", {"class": "tc-price"})["data-s"])
             else:
                 price = float(offer.find("div", {"class": "tc-price"}).find("div").text.split()[0])
-            lot_obj = types.LotShortcut(offer_id, server, description, price, subcategory_obj, str(offer))
+            lot_obj = types.LotShortcut(offer_id, server, description, price, subcategory_obj, str(offer), owner)
             result.append(lot_obj)
         return result
 

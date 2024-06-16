@@ -7,6 +7,7 @@ from .common.utils import RegularExpressions
 from .common.enums import MessageTypes, OrderStatuses, SubCategoryTypes
 import datetime
 import json
+from bs4 import BeautifulSoup
 
 
 class ChatShortcut:
@@ -597,7 +598,7 @@ class LotShortcut:
     :type html: :obj:`str`
     """
     def __init__(self, id_: int | str, server: str | None,
-                 description: str | None, price: float, subcategory: SubCategory, html: str):
+                 description: str | None, price: float, subcategory: SubCategory, html: str, owner: str):
         self.id: int | str = id_
         if isinstance(self.id, str) and self.id.isnumeric():
             self.id = int(self.id)
@@ -618,9 +619,12 @@ class LotShortcut:
             if self.subcategory.type is SubCategoryTypes.CURRENCY else f"https://funpay.com/lots/offer?id={self.id}"
         """Публичная ссылка на лот."""
 
+        self.owner = owner
+
     def __str__(self):
         return json.dumps({
             "id": self.id,
+            "owner": self.owner,
             "server": self.server,
             "description": self.description,
             "title": self.title,
