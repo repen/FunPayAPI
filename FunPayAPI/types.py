@@ -617,6 +617,11 @@ class LotShortcut:
             if self.subcategory.type is SubCategoryTypes.CURRENCY else f"https://funpay.com/lots/offer?id={self.id}"
         """Публичная ссылка на лот."""
 
+    def __lt__(self, other):
+        if not isinstance(other, LotShortcut):
+            return NotImplemented
+        return self.price < other.price
+
 
 class UserProfile:
     """
