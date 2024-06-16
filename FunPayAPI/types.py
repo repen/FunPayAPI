@@ -7,7 +7,6 @@ from .common.utils import RegularExpressions
 from .common.enums import MessageTypes, OrderStatuses, SubCategoryTypes
 import datetime
 import json
-from bs4 import BeautifulSoup
 
 
 class ChatShortcut:
