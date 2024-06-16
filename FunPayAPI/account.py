@@ -1202,8 +1202,7 @@ class Account:
         }
         response = self.method("get", f"lots/offerEdit?offer={lot_id}", headers, {}, raise_not_200=True)
 
-        json_response = response.json()
-        bs = BeautifulSoup(json_response["html"], "html.parser")
+        bs = BeautifulSoup(response.text, "html.parser")
 
         result = {"active": "", "deactivate_after_sale": ""}
         result.update({field["name"]: field.get("value") or "" for field in bs.find_all("input")
@@ -1227,7 +1226,7 @@ class Account:
             "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
             "x-requested-with": "XMLHttpRequest",
         }
-        fields = lot_fields.renew_fields().fields
+        fields = lot_fields.fields
         fields["location"] = "trade"
 
         response = self.method("post", "lots/offerSave", headers, fields, raise_not_200=True)
