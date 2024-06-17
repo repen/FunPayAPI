@@ -1211,6 +1211,16 @@ class Account:
         result.update({field["name"]: field.text or "" for field in bs.find_all("textarea")})
         result.update({field["name"]: field.find("option", selected=True)["value"] for field in bs.find_all("select")})
         result.update({field["name"]: "on" for field in bs.find_all("input", {"type": "checkbox"}, checked=True)})
+        result['calc_table'] = []
+
+        for item in bs.select(".table-buyers-prices tr"):
+            temp = {
+                "name": item.select_one("th").text,
+                "value": item.select_one("td").text
+            }
+
+            result['calc_table'].append(temp)
+
         return types.LotFields(lot_id, result)
 
     def save_lot(self, lot_fields: types.LotFields):
