@@ -1196,23 +1196,24 @@ class Account:
         """
         if not self.is_initiated:
             raise exceptions.AccountNotInitiatedError()
-        headers = {
-            "accept": "*/*",
-            "content-type": "application/json",
-            "x-requested-with": "XMLHttpRequest",
-        }
+        headers = {}
         response = self.method("get", f"lots/offerEdit?offer={lot_id}", headers, {}, raise_not_200=True)
 
-        bs = BeautifulSoup(response.text, "html.parser")
+        html_response = response.content.decode()
+        bs = BeautifulSoup(html_response, "html.parser")
 
         result = {"active": "", "deactivate_after_sale": ""}
         result.update({field["name"]: field.get("value") or "" for field in bs.find_all("input")
                        if field["name"] not in ["active", "deactivate_after_sale"]})
         result.update({field["name"]: field.text or "" for field in bs.find_all("textarea")})
-        result.update({field["name"]: field.find("option", selected=True)["value"] for field in bs.find_all("select")})
+        result.update({
+            field["name"]: field.find("option", selected=True)["value"]
+            for field in bs.find_all("select") if
+            "hidden" not in field.find_parent(class_="form-group").get("class", [])
+        })
         result.update({field["name"]: "on" for field in bs.find_all("input", {"type": "checkbox"}, checked=True)})
+        # add
         result['calc_table'] = []
-
         for item in bs.select(".table-buyers-prices tr"):
             temp = {
                 "name": item.select_one("th").text,
